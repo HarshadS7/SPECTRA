@@ -1,4 +1,4 @@
-# 🌌 SPECTRA-1
+# 🌌 SPECTRA
 
 Systemic risk engine for interbank payment networks. Temporal GNN forecasts how liquidity shocks cascade across banks, identifies systemically critical institutions, and quantifies settlement savings through multilateral obligation netting.
 
