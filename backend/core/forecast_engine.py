@@ -29,6 +29,7 @@ class ForecastEngine:
         model: TemporalGNN | SuperNodeGNN,
         loader: TimeSeriesLoader,
         device: str | None = None,
+        norm_stats: dict | None = None,
     ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
@@ -36,6 +37,7 @@ class ForecastEngine:
         self.loader = loader
         self.optimizer = OptimizationNode()
         self.is_temporal = isinstance(model, TemporalGNN)
+        self.norm_stats = norm_stats
 
     # ------------------------------------------------------------------
     # Model loading helpers
@@ -43,32 +45,39 @@ class ForecastEngine:
     @staticmethod
     def load_temporal(
         path: str,
-        node_features: int = 2,
+        node_features: int = 4,
         hidden_dim: int = 64,
         num_horizons: int = 5,
         device: str | None = None,
-    ) -> TemporalGNN:
+    ) -> tuple[TemporalGNN, dict]:
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         m = TemporalGNN(
             node_features=node_features,
             hidden_dim=hidden_dim,
             num_horizons=num_horizons,
         ).to(device)
-        m.load_state_dict(torch.load(path, map_location=device))
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+        if "model_state_dict" in checkpoint:
+            m.load_state_dict(checkpoint["model_state_dict"])
+            norm_stats = {
+                "mean": checkpoint.get("target_mean"),
+                "std": checkpoint.get("target_std"),
+            }
+        else:
+            m.load_state_dict(checkpoint)
+            norm_stats = None
         m.eval()
-        return m
+        return m, norm_stats
 
     @staticmethod
     def load_legacy(
         path: str,
-        node_features: int = 2,
+        node_features: int = 4,
         hidden_dim: int = 32,
         device: str | None = None,
     ) -> SuperNodeGNN:
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        m = SuperNodeGNN(
-            node_features=node_features, hidden_dim=hidden_dim
-        ).to(device)
+        m = SuperNodeGNN(node_features=node_features, hidden_dim=hidden_dim).to(device)
         m.load_state_dict(torch.load(path, map_location=device))
         m.eval()
         return m
@@ -142,23 +151,20 @@ class ForecastEngine:
     # Main entry point
     # ------------------------------------------------------------------
     def run_forecast(self) -> dict:
-        """
-        Returns
-        -------
-        {
-          "horizons": [ { …snapshot… }, … ],
-          "metadata": { tickers, date_range, … },
-        }
-        """
-        edge_index = self.loader.edge_index.to(self.device)
+        edge_index = self.loader.get_latest_edge_index().to(self.device)
         liquidity = self.loader.build_liquidity().to(self.device)
         base_obl = self.loader.build_base_obligations().to(self.device)
         ts_risk = self.loader.build_time_series_risk_factor().to(self.device)
-        latest = self.loader.get_latest_window().to(self.device)  # [N, W, F]
+        latest = self.loader.get_latest_window().to(self.device)
 
         if self.is_temporal:
             with torch.no_grad():
                 all_forecasts = self.model.forecast_single(latest, edge_index)
+
+            if self.norm_stats and self.norm_stats.get("mean") is not None:
+                std = self.norm_stats["std"].squeeze().to(self.device)
+                mean = self.norm_stats["mean"].squeeze().to(self.device)
+                all_forecasts = all_forecasts * std + mean
 
             horizons = []
             for k in range(all_forecasts.shape[0]):
@@ -200,9 +206,7 @@ class ForecastEngine:
         return obligations
 
     @staticmethod
-    def _risk_jacobian(
-        pred_O: torch.Tensor, liquidity: torch.Tensor
-    ) -> torch.Tensor:
+    def _risk_jacobian(pred_O: torch.Tensor, liquidity: torch.Tensor) -> torch.Tensor:
         pred_O = pred_O.clone().detach().requires_grad_(True)
         liquidity = liquidity.clone().detach()
 

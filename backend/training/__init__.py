@@ -1,4 +1,4 @@
-from .train_legacy import train as train_legacy
 from .train_temporal import train as train_temporal
+from .train_improved import train as train_improved
 
-__all__ = ["train_legacy", "train_temporal"]
+__all__ = ["train_temporal", "train_improved"]

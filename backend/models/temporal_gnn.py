@@ -34,7 +34,7 @@ class TemporalGNN(nn.Module):
 
     def __init__(
         self,
-        node_features: int = 2,
+        node_features: int = 4,
         hidden_dim: int = 64,
         num_horizons: int = 5,
         dropout: float = 0.2,
@@ -54,61 +54,91 @@ class TemporalGNN(nn.Module):
             num_layers=2,
             batch_first=True,
             dropout=dropout,
-            bidirectional=True,
+            bidirectional=False,
         )
 
         self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(hidden_dim * 2)  # bidirectional
+        self.layer_norm = nn.LayerNorm(hidden_dim)  # unidirectional
 
         # Per-horizon linear heads
         self.horizon_heads = nn.ModuleList(
-            [nn.Linear(hidden_dim * 2, 1) for _ in range(num_horizons)]
+            [nn.Linear(hidden_dim, 1) for _ in range(num_horizons)]
         )
 
         self.relu = nn.ReLU()
 
-    def forward(
-        self, x: torch.Tensor, edge_index: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
         Parameters
         ----------
-        x : Tensor [N, T, F]
-        edge_index : Tensor [2, E]
+        x : Tensor [B, N, T, F] (batched) or [N, T, F] (single)
+        edge_index : Tensor [2, E] or list of tensors for batched
 
         Returns
         -------
-        forecasts : Tensor [num_horizons, N, 1]
+        forecasts : Tensor [B, K, N] (batched) or [K, N] (single)
         """
+        if x.dim() == 3:
+            return self._forward_single(x, edge_index).squeeze(-1)
+        return self._forward_batch(x, edge_index)
+
+    def _forward_single(
+        self, x: torch.Tensor, edge_index: torch.Tensor
+    ) -> torch.Tensor:
         num_nodes, seq_len, num_feats = x.size()
 
-        # --- Spatial pass (per-timestep GCN) ---
-        x_flat = x.reshape(-1, num_feats)                          # [N*T, F]
+        x_flat = x.reshape(-1, num_feats)
         ei_expanded = self._expand_edge_index(edge_index, num_nodes, seq_len)
 
-        h = self.relu(self.gcn1(x_flat, ei_expanded))              # [N*T, H]
-        h = self.relu(self.gcn2(h, ei_expanded))                   # [N*T, H]
+        h = self.relu(self.gcn1(x_flat, ei_expanded))
+        h = self.relu(self.gcn2(h, ei_expanded))
+        h = h.view(num_nodes, seq_len, self.hidden_dim)
 
-        h = h.view(num_nodes, seq_len, self.hidden_dim)            # [N, T, H]
-
-        # --- Temporal pass ---
-        lstm_out, _ = self.lstm(h)                                 # [N, T, 2H]
+        lstm_out, _ = self.lstm(h)
         lstm_out = self.layer_norm(lstm_out)
-        context = self.dropout(lstm_out[:, -1, :])                 # [N, 2H]
+        context = self.dropout(lstm_out[:, -1, :])
 
-        # --- Multi-horizon heads ---
-        forecasts = torch.stack(
-            [head(context) for head in self.horizon_heads], dim=0
-        )  # [K, N, 1]
-
+        forecasts = torch.stack([head(context) for head in self.horizon_heads], dim=0)
         return forecasts
 
-    # helpers ---------------------------------------------------------
+    def _forward_batch(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+        batch_size, num_nodes, seq_len, num_feats = x.size()
+
+        x_flat = x.reshape(-1, num_feats)
+
+        if isinstance(edge_index, list):
+            ei_expanded = torch.cat(
+                [
+                    self._expand_edge_index(ei, num_nodes, seq_len)
+                    + b * num_nodes * seq_len
+                    for b, ei in enumerate(edge_index)
+                ],
+                dim=1,
+            )
+        else:
+            ei_expanded = self._expand_edge_index(edge_index, num_nodes, seq_len)
+            ei_expanded = torch.cat(
+                [ei_expanded + b * num_nodes * seq_len for b in range(batch_size)],
+                dim=1,
+            )
+
+        h = self.relu(self.gcn1(x_flat, ei_expanded))
+        h = self.relu(self.gcn2(h, ei_expanded))
+        h = h.view(batch_size, num_nodes, seq_len, self.hidden_dim)
+        h = h.view(batch_size * num_nodes, seq_len, self.hidden_dim)
+
+        lstm_out, _ = self.lstm(h)
+        lstm_out = self.layer_norm(lstm_out)
+        context = self.dropout(lstm_out[:, -1, :])
+        context = context.view(batch_size, num_nodes, -1)
+
+        forecasts = torch.stack([head(context) for head in self.horizon_heads], dim=1)
+        return forecasts.squeeze(-1)
+
     @staticmethod
     def _expand_edge_index(
         edge_index: torch.Tensor, num_nodes: int, seq_len: int
     ) -> torch.Tensor:
-        """Replicate graph connectivity across T timesteps."""
         offsets = torch.arange(seq_len, device=edge_index.device) * num_nodes
         ei_list = [edge_index + o for o in offsets]
         return torch.cat(ei_list, dim=1)
@@ -116,5 +146,4 @@ class TemporalGNN(nn.Module):
     def forecast_single(
         self, x: torch.Tensor, edge_index: torch.Tensor
     ) -> torch.Tensor:
-        """Convenience: return [K, N] instead of [K, N, 1]."""
-        return self.forward(x, edge_index).squeeze(-1)
+        return self._forward_single(x, edge_index).squeeze(-1)

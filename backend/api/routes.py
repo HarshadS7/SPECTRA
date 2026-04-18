@@ -43,12 +43,14 @@ def _format_snapshot(snap: dict, tickers: list[str]) -> HorizonSnapshot:
     n = len(tickers)
     banks = []
     for i, name in enumerate(tickers):
-        banks.append(BankResult(
-            name=name,
-            predicted_score=round(float(snap["node_scores"][i]), 6),
-            hub_score=round(float(snap["systemic_hubs"][i]), 4),
-            risk_factor=round(float(snap["risk_factor"][i]), 6),
-        ))
+        banks.append(
+            BankResult(
+                name=name,
+                predicted_score=round(float(snap["node_scores"][i]), 6),
+                hub_score=round(float(snap["systemic_hubs"][i]), 4),
+                risk_factor=round(float(snap["risk_factor"][i]), 6),
+            )
+        )
 
     ob_before = snap["obligations_before"]
     ob_after = snap["obligations_after"]
@@ -61,15 +63,23 @@ def _format_snapshot(snap: dict, tickers: list[str]) -> HorizonSnapshot:
             wb = float(ob_before[i][j])
             wa = float(ob_after[i][j])
             if wb > 0.01:
-                edges_before.append(EdgeResult(
-                    source=tickers[i], target=tickers[j],
-                    weight_before=round(wb, 4), weight_after=round(wa, 4),
-                ))
+                edges_before.append(
+                    EdgeResult(
+                        source=tickers[i],
+                        target=tickers[j],
+                        weight_before=round(wb, 4),
+                        weight_after=round(wa, 4),
+                    )
+                )
             if wa > 0.01:
-                edges_after.append(EdgeResult(
-                    source=tickers[i], target=tickers[j],
-                    weight_before=round(wb, 4), weight_after=round(wa, 4),
-                ))
+                edges_after.append(
+                    EdgeResult(
+                        source=tickers[i],
+                        target=tickers[j],
+                        weight_before=round(wb, 4),
+                        weight_after=round(wa, 4),
+                    )
+                )
 
     return HorizonSnapshot(
         horizon=snap["horizon"],
@@ -82,11 +92,23 @@ def _format_snapshot(snap: dict, tickers: list[str]) -> HorizonSnapshot:
         raw_load=round(snap["raw_load"], 2),
         net_load=round(snap["net_load"], 2),
         risk_buffer=round(float(snap.get("risk_buffer", 0.0)), 2),
-        risk_adjusted_net_load=round(float(snap.get("risk_adjusted_net_load", snap["net_load"])), 2),
-        risk_adjusted_payload_reduction=round(float(snap.get("risk_adjusted_payload_reduction", snap["payload_reduction"])), 2),
+        risk_adjusted_net_load=round(
+            float(snap.get("risk_adjusted_net_load", snap["net_load"])), 2
+        ),
+        risk_adjusted_payload_reduction=round(
+            float(
+                snap.get("risk_adjusted_payload_reduction", snap["payload_reduction"])
+            ),
+            2,
+        ),
         worst_case_buffer=round(float(snap.get("worst_case_buffer", 0.0)), 2),
-        worst_case_net_load=round(float(snap.get("worst_case_net_load", snap["net_load"])), 2),
-        worst_case_payload_reduction=round(float(snap.get("worst_case_payload_reduction", snap["payload_reduction"])), 2),
+        worst_case_net_load=round(
+            float(snap.get("worst_case_net_load", snap["net_load"])), 2
+        ),
+        worst_case_payload_reduction=round(
+            float(snap.get("worst_case_payload_reduction", snap["payload_reduction"])),
+            2,
+        ),
         obligations_before=[[round(float(v), 4) for v in row] for row in ob_before],
         obligations_after=[[round(float(v), 4) for v in row] for row in ob_after],
     )
@@ -190,58 +212,58 @@ def get_risk_assessment(horizon: int = 1):
     if not api_key:
         return AnalystResponse(
             risk_assessment="⚠️ Featherless API key not found. Please set FEATHERLESS_API_KEY in .env.",
-            status="error"
+            status="error",
         )
 
     analyst = ReLuLuAnalyst(api_key)
-    
+
     # Get cached forecast
     result = ticker.cached_forecast
     if result is None:
-         return AnalystResponse(
+        return AnalystResponse(
             risk_assessment="⚠️ System initializing - no forecast data available yet.",
-            status="error"
+            status="error",
         )
 
     # Validate horizon
     if horizon < 1 or horizon > len(result["horizons"]):
-         return AnalystResponse(
+        return AnalystResponse(
             risk_assessment=f"⚠️ Invalid horizon T+{horizon}. Max horizon is T+{len(result['horizons'])}.",
-            status="error"
+            status="error",
         )
 
     # Extract horizon data
     snap = result["horizons"][horizon - 1]
-    
+
     # Prepare data for analyst
     # adapt snapshot data to flat dictionary expected by analyst.py
     forecast_data = {
-        "hubs": snap["systemic_hubs"], # This assumes systemic_hubs is a list of names/scores?
+        "hubs": snap[
+            "systemic_hubs"
+        ],  # This assumes systemic_hubs is a list of names/scores?
         # Wait, in forecast_engine.py:
         # hubs, stability = self.optimizer.get_systemic_hubs(risk_adj)
         # get_systemic_hubs returns (centrality_scores, stability_limit)
         # It doesn't seem to return names directly in 'systemic_hubs'.
-        # Let's check _format_snapshot. 
+        # Let's check _format_snapshot.
         # snap["systemic_hubs"] is used as hub_score in BankResult.
         # so snap["systemic_hubs"] is a list of floats (centrality scores).
-        
         # analyst.py expects: "hubs: List of primary systemic hub bank names"
         # So I need to find the hubs from the scores.
-        
         "reduction_pct": snap["payload_reduction"],
         "stability_index": snap["stability"],
         "horizon": horizon,
         "is_stable": snap["stability"] < 1.0,
         "raw_load": snap["raw_load"],
         "net_load": snap["net_load"],
-        "all_horizons": [] # populate if we want temporal analysis
+        "all_horizons": [],  # populate if we want temporal analysis
     }
 
     # Find hub names (banks with high centrality)
     # We need the list of tickers.
     tickers = result["metadata"]["tickers"]
-    hub_scores = snap["systemic_hubs"] # list of floats
-    
+    hub_scores = snap["systemic_hubs"]  # list of floats
+
     # Identify top hub(s)
     # Simple heuristic: max score
     if hub_scores is not None and len(hub_scores) == len(tickers):
@@ -256,43 +278,90 @@ def get_risk_assessment(horizon: int = 1):
     # Let's populate all_horizons with simplified data
     all_horizons_data = []
     for h_snap in result["horizons"]:
-         all_horizons_data.append({
-             "stability_index": h_snap["stability"],
-             "reduction_pct": h_snap["payload_reduction"],
-             "net_load": h_snap["net_load"],
-             "horizon": h_snap.get("horizon", 0)
-         })
+        all_horizons_data.append(
+            {
+                "stability_index": h_snap["stability"],
+                "reduction_pct": h_snap["payload_reduction"],
+                "net_load": h_snap["net_load"],
+                "horizon": h_snap.get("horizon", 0),
+            }
+        )
     forecast_data["all_horizons"] = all_horizons_data
 
     assessment = analyst.summarize_risk(forecast_data)
-    
-    return AnalystResponse(
-        risk_assessment=assessment,
-        status="ok"
-    )
+
+    return AnalystResponse(risk_assessment=assessment, status="ok")
 
 
 # =====================================================================
 # Backtesting Routes
 # =====================================================================
-@router.get("/backtest", response_model=BacktestResponse)
+@router.get("/backtest")
 def run_backtest(days: int = 30):
     """
-    Run a backtest comparing historical predictions to actual outcomes.
-    
+    Run a model-based backtest comparing predictions to actual outcomes.
+    Uses the trained TemporalGNN model for forecasting.
+
     Args:
         days: Number of days to backtest (default 30)
     """
     if _engine is None or _engine.loader is None:
         return {
-            "aggregate": {"total_days": 0, "avg_mae": None, "avg_directional_accuracy": None, "best_day": None, "worst_day": None},
+            "aggregate": {
+                "total_days": 0,
+                "avg_mae": None,
+                "avg_directional_accuracy": None,
+                "best_day": None,
+                "worst_day": None,
+                "per_horizon": {},
+                "overall": {
+                    "avg_mae": None,
+                    "avg_directional_accuracy": None,
+                    "total_predictions": 0,
+                },
+            },
             "results": [],
             "timestamp": "",
         }
-    
-    backtest = BacktestEngine(_engine.loader)
-    result = backtest.run_backtest(lookback_days=days)
-    return result
+
+    backtest = BacktestEngine(_engine.loader, _engine.model, device=_engine.device)
+    backtest.set_model(_engine.model)
+    backtest.normalization_stats = _engine.norm_stats
+    result = backtest.run_model_backtest(lookback_days=days, stride=1)
+
+    # Format for frontend compatibility
+    agg = result.get("aggregate", {})
+    overall = agg.get("overall", {})
+
+    # Find best/worst days
+    best_day = None
+    worst_day = None
+    best_mae = float('inf')
+    worst_mae = -float('inf')
+
+    for r in result.get("results", []):
+        mae = r.get("metrics", {}).get("mae")
+        if mae is not None:
+            if mae < best_mae:
+                best_mae = mae
+                best_day = r.get("date")
+            if mae > worst_mae:
+                worst_mae = mae
+                worst_day = r.get("date")
+
+    return {
+        "aggregate": {
+            "total_days": overall.get("total_predictions", 0),
+            "avg_mae": overall.get("avg_mae"),
+            "avg_directional_accuracy": overall.get("avg_directional_accuracy"),
+            "best_day": best_day,
+            "worst_day": worst_day,
+            "per_horizon": agg.get("per_horizon", {}),
+            "overall": overall,
+        },
+        "results": result.get("results", []),
+        "timestamp": result.get("timestamp", ""),
+    }
 
 
 @router.get("/backtest/history")
@@ -300,7 +369,7 @@ def get_backtest_history(limit: int = 10):
     """Get recent backtest history entries."""
     if _engine is None or _engine.loader is None:
         return {"history": []}
-    
+
     backtest = BacktestEngine(_engine.loader)
     return {"history": backtest.get_history(limit=limit)}
 
@@ -352,7 +421,7 @@ def check_alerts():
     result = ticker.cached_forecast
     if result is None:
         return {"triggered": [], "message": "No forecast data available"}
-    
+
     # Get first horizon data for checking
     snap = result["horizons"][0]
     forecast_data = {
@@ -360,10 +429,10 @@ def check_alerts():
         "payload_reduction": snap["payload_reduction"],
         "net_load": snap["net_load"],
     }
-    
+
     manager = get_alert_manager()
     triggered = manager.check_alerts(forecast_data)
-    
+
     return {
         "triggered": triggered,
         "checked_at": forecast_data,

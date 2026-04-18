@@ -36,7 +36,7 @@ ANOMALY_LOOKBACK_DAYS = 60    # window for computing μ and σ
 ANOMALY_RECENT_DAYS  = 5      # how many recent days to scan for spikes
 
 # --- Model paths (relative to backend/) ---
-TEMPORAL_MODEL_PATH = "temporal_gnn_v1.pth"
+TEMPORAL_MODEL_PATH = "temporal_gnn_v2.pth"
 LEGACY_MODEL_PATH = "super_node_v1.pth"
 
 # --- Market caps for netting reports (billions USD) ---

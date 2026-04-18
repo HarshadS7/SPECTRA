@@ -43,15 +43,15 @@ def _refresh_data():
 
     _loader = TimeSeriesLoader(period="2y").load()
 
-    temporal_path = os.path.join(SCRIPT_DIR, "temporal_gnn_v1.pth")
+    temporal_path = os.path.join(SCRIPT_DIR, "temporal_gnn_v2.pth")
     legacy_path = os.path.join(SCRIPT_DIR, "super_node_v1.pth")
 
     if os.path.exists(temporal_path):
-        model = ForecastEngine.load_temporal(temporal_path)
+        model, norm_stats = ForecastEngine.load_temporal(temporal_path)
+        _engine = ForecastEngine(model, _loader, norm_stats=norm_stats)
     else:
         model = ForecastEngine.load_legacy(legacy_path)
-
-    _engine = ForecastEngine(model, _loader)
+        _engine = ForecastEngine(model, _loader)
     set_engine(_engine)
 
 
@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
         print("[APP] Engine ready — starting live ticker")
     except Exception as exc:
         import traceback
+
         print(f"[APP] STARTUP ERROR: {exc}")
         traceback.print_exc()
 

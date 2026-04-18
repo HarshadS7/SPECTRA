@@ -1,6 +1,50 @@
-venv/
-node_modules/
-.env
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Ruff
+.ruff_cache/
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Next.js
+.next/
+out/
+
+# OS
 .DS_Store
-backend/.env
+Thumbs.db
+
+# Model checkpoints — keep only the active v2
+*.pth
+!backend/temporal_gnn_v2.pth
+!backend/super_node_v1.pth
+
+# Runtime files
+backend/alerts.json
+
+# Data artifacts
+*.csv
+*.parquet
